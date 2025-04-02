@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Survesh's Block Buster</title> <!-- Renamed -->
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            /* Align items to center vertically and horizontally */
+            flex-direction: column; /* Stack container and button vertically */
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #1a1a1a;
+            overflow: hidden;
+            font-family: sans-serif;
+            -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none;
+        }
+        #gameContainer {
+            position: relative;
+            border: 2px solid #555;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+            max-width: 100%;
+            max-height: calc(100vh - 50px); /* Leave space for button */
+            /* Ensure aspect ratio is maintained if needed, though fixed canvas size dominates */
+             aspect-ratio: 800 / 600;
+        }
+        canvas {
+            display: block;
+            background-color: #000;
+            /* Canvas scaling */
+            width: 100%; /* Fit container width */
+            height: 100%; /* Fit container height */
+            object-fit: contain; /* Maintain aspect ratio within container bounds */
+        }
+        #messageOverlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: rgba(0, 0, 0, 0.75); color: white;
+            display: none; flex-direction: column; justify-content: center;
+            align-items: center; text-align: center; z-index: 10; cursor: pointer;
+        }
+        #messageOverlay h1 { font-size: 2.5em; margin-bottom: 10px; text-shadow: 0 0 10px currentColor; }
+        #messageOverlay p { font-size: 1.1em; margin-top: 5px; padding: 0 10px; }
+        #messageOverlay p.instructions { font-size: 0.9em; margin-top: 15px; color: #ccc; }
+        #messageOverlay.gameOver h1 { color: #FF5555; }
+        #messageOverlay.levelCleared h1 { color: #55FF55; }
+        #messageOverlay.finalWin h1 { color: #FFD700; }
+
+        /* Fullscreen Button Style */
+        #fullscreenBtn {
+            margin-top: 10px; /* Space below game */
+            padding: 8px 15px;
+            font-size: 1em;
+            cursor: pointer;
+            background-color: #444;
+            color: white;
+            border: 1px solid #666;
+            border-radius: 5px;
+        }
+        #fullscreenBtn:hover {
+            background-color: #555;
+        }
+    </style>
+</head>
+<body>
+    <!-- Message Overlay first for stacking context if needed -->
+     <div id="messageOverlay">
+        <h1 id="messageTitle"></h1>
+        <p id="messageText"></p>
+        <p id="messageInstructions" class="instructions"></p>
+    </div>
+    <!-- Game Container -->
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+    <!-- Fullscreen Button -->
+    <button id="fullscreenBtn">Fullscreen</button>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log("DOM Ready. Initializing Survesh's Block Buster...");
+
+            const canvas = document.getElementById('gameCanvas');
+            const messageOverlay = document.getElementById('messageOverlay');
+            const messageTitle = document.getElementById('messageTitle');
+            const messageText = document.getElementById('messageText');
+            const messageInstructions = document.getElementById('messageInstructions');
+            const fullscreenBtn = document.getElementById('fullscreenBtn'); // Get the button
+            const gameContainer = document.getElementById('gameContainer'); // Element to make fullscreen
+
+
+            if (!canvas || !messageOverlay || !fullscreenBtn || !gameContainer) {
+                alert("ERROR: Cannot find required HTML elements (canvas, overlay, button, container)!");
+                return;
+            }
+            const ctx = canvas.getContext('2d');
+            if (!ctx) { alert("ERROR: Cannot get 2D context!"); return; }
+
+            // --- Constants ---
+            const SCREEN_WIDTH = 800; const SCREEN_HEIGHT = 600; canvas.width = SCREEN_WIDTH; canvas.height = SCREEN_HEIGHT;
+            const PADDLE_WIDTH = 100; const PADDLE_HEIGHT = 15; const PADDLE_COLOR = '#00FFFF'; const PADDLE_SPEED = 7;
+            const ORB_RADIUS = 10; const ORB_INITIAL_SPEED = 4.0; const ORB_COLOR = '#FF00FF'; const ORB_GLOW_COLOR = 'rgba(255, 0, 255, 0.4)';
+            const BLOCK_WIDTH = 60; const BLOCK_HEIGHT = 20; const BLOCK_PADDING = 5; const BLOCK_OFFSET_TOP = 60; const BLOCK_COL_GAP = 5; // Increased TOP offset for title
+            const ORB_SPEED_INCREASE_PER_HIT = 0.03;
+            const MAX_LEVELS = 3;
+            const ORB_SPEED_INCREASE_PER_LEVEL = 0.5;
+
+            // --- Colors & Block Properties (same) ---
+            const WHITE = '#E6E6E6'; const GREY = '#646464'; const GREEN = '#00FF00'; const YELLOW = '#FFFF00'; const ORANGE = '#FFA500'; const RED = '#FF0000'; const PURPLE = '#800080'; const BLUE = '#0000FF'; const VIOLET = '#EE82EE'; const BROWN = '#8B4513'; const GOLD = '#FFD700'; const GOLD_GLOW_1 = 'rgba(255, 215, 0, 0.7)'; const GOLD_GLOW_2 = 'rgba(255, 255, 180, 0.5)';
+            const BLOCK_PROPERTIES = { 'G': { health: 1, color: GREEN }, 'Y': { health: 2, color: YELLOW }, 'O': { health: 3, color: ORANGE }, 'R': { health: 4, color: RED }, 'P': { health: 5, color: PURPLE }, 'B': { health: 6, color: BLUE }, 'V': { health: 7, color: VIOLET }, 'N': { health: 8, color: BROWN }, 'I': { health: Infinity, color: GREY } };
+
+            // --- LEVEL DATA (same) ---
+            const LEVEL_DATA = [ [ "...........", ".GYGYGYGYG.", ".YGY O GYGY.", ".GYGYGYGYG.", "..I.....I..", ".GY O GYGYG.", "...........", ], [ "..I...I...I", ".GPGGGGBGGG", ".GGGGGGGGGG", "I.GRG.ORG.I", ".GGGGGGGGGG", ".GGGVGGGGGG", "...........", ], [ "IYIYIYIYIYI", "I.O.R.P.B.I", "I.VINIYIOII", "I.........I", "...........", "...........", "...........", ] ];
+
+            // --- Game State Variables (same) ---
+            let lives = 3; let score = 0; let currentLevel = 0; let gameState = "loading"; let breakableBlockCount = 0; let lastDestroyedBlockPos = { x: SCREEN_WIDTH / 2, y: SCREEN_HEIGHT / 2 }; let leftPressed = false; let rightPressed = false; let animationFrameId = null;
+
+            // --- Game Objects (same) ---
+            let paddle = null; let orb = null; let blocks = [];
+
+             // --- Orb Helper Functions (same) ---
+             function increaseOrbSpeed(amount) { if(!orb) return; orb.currentSpeed += amount; const speedMagnitude = Math.sqrt(orb.dx**2 + orb.dy**2); if (speedMagnitude > 0) { const scale = orb.currentSpeed / speedMagnitude; orb.dx *= scale; orb.dy *= scale; } }
+             function resetOrbSpeed() { if(!orb) return; orb.currentSpeed = orb.baseSpeed; const speedMagnitude = Math.sqrt(orb.dx**2 + orb.dy**2); if (speedMagnitude > 0) { const scale = orb.currentSpeed / speedMagnitude; orb.dx *= scale; orb.dy *= scale; } else { resetOrbPositionAndAngle(); } }
+             function resetOrbPositionAndAngle() { if(!orb || !paddle) return; orb.x = paddle.x + paddle.width / 2; orb.y = paddle.y - 30; orb.dx = orb.currentSpeed * (Math.random() < 0.5 ? 1 : -1); orb.dy = -orb.currentSpeed; if (Math.abs(orb.dy) < 1) orb.dy = -orb.currentSpeed; }
+             function darkenColor(hexColor, factor) { try { if(hexColor.length===4){ let r=parseInt(hexColor[1]+hexColor[1],16),g=parseInt(hexColor[2]+hexColor[2],16),b=parseInt(hexColor[3]+hexColor[3],16); r=Math.max(0,Math.floor(r*factor));g=Math.max(0,Math.floor(g*factor));b=Math.max(0,Math.floor(b*factor)); return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`; } else if(hexColor.length===7){ let r=parseInt(hexColor.slice(1,3),16),g=parseInt(hexColor.slice(3,5),16),b=parseInt(hexColor.slice(5,7),16); r=Math.max(0,Math.floor(r*factor));g=Math.max(0,Math.floor(g*factor));b=Math.max(0,Math.floor(b*factor)); return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`; } else { return hexColor; } } catch(e) { console.warn("darkenColor failed:", e); return hexColor; } }
+
+            // --- Setup Level Function (same logic, uses BLOCK_OFFSET_TOP) ---
+            function setupLevel(levelIndex) { /* ... same block creation logic ... */ console.log(`Setting up Level ${levelIndex + 1}`); blocks = []; breakableBlockCount = 0; hideMessage(); if (levelIndex < 0 || levelIndex >= LEVEL_DATA.length) { console.error("Invalid level index attempted:", levelIndex); gameState = "gameOver"; showMessage("Error", "Invalid level state.", false); return; } paddle = { x: (SCREEN_WIDTH - PADDLE_WIDTH) / 2, y: SCREEN_HEIGHT - PADDLE_HEIGHT - 20, width: PADDLE_WIDTH, height: PADDLE_HEIGHT, color: PADDLE_COLOR, speed: PADDLE_SPEED }; const orbBaseSpeed = ORB_INITIAL_SPEED + levelIndex * ORB_SPEED_INCREASE_PER_LEVEL; orb = { x: SCREEN_WIDTH / 2, y: SCREEN_HEIGHT / 2, radius: ORB_RADIUS, baseSpeed: orbBaseSpeed, currentSpeed: orbBaseSpeed, dx: 0, dy: 0, color: ORB_COLOR, glowRadius: ORB_RADIUS * 1.8, glowColor: ORB_GLOW_COLOR }; resetOrbPositionAndAngle(); const levelLayout = LEVEL_DATA[levelIndex]; const numRows = levelLayout.length; let maxCols = 0; if (numRows > 0) { maxCols = Math.max(...levelLayout.map(row => row.trim().length)); } if (maxCols === 0) return; let effectiveBlockWidth = BLOCK_WIDTH; let effectiveColGap = BLOCK_COL_GAP; const totalBlockAreaWidth = maxCols * effectiveBlockWidth + (maxCols > 0 ? (maxCols - 1) * effectiveColGap : 0); let sideMargin = Math.max(10, (SCREEN_WIDTH - totalBlockAreaWidth) / 2); for (let r = 0; r < numRows; r++) { const rowString = levelLayout[r].trim(); const rowLength = rowString.length; for (let c = 0; c < rowLength; c++) { const blockChar = rowString[c]; if (blockChar !== '.' && blockChar !== ' ') { const props = BLOCK_PROPERTIES[blockChar]; if (props) { const blockX = sideMargin + c * (effectiveBlockWidth + effectiveColGap); const blockY = BLOCK_OFFSET_TOP + r * (BLOCK_HEIGHT + BLOCK_PADDING); const newBlock = { x: blockX, y: blockY, width: effectiveBlockWidth, height: BLOCK_HEIGHT, char: blockChar, health: props.health, maxHealth: props.health, baseColor: props.color, currentColor: props.color, visible: true, isBreakable: (blockChar !== 'I') }; blocks.push(newBlock); if (newBlock.isBreakable) { breakableBlockCount++; } } else { console.warn("Unknown block char:", blockChar); } } } } console.log(`Level ${levelIndex + 1} setup complete. Breakable Blocks: ${breakableBlockCount}`); }
+
+            // --- Drawing Functions ---
+            function drawPaddle() { /* ... */ if(!paddle) return; ctx.fillStyle = paddle.color; ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height); ctx.strokeStyle=WHITE; ctx.lineWidth=1; ctx.strokeRect(paddle.x,paddle.y,paddle.width,paddle.height); }
+            function drawOrb() { /* ... */ if(!orb) return; ctx.beginPath();ctx.arc(orb.x,orb.y,orb.glowRadius,0,Math.PI*2);ctx.fillStyle=orb.glowColor;ctx.fill(); ctx.beginPath();ctx.arc(orb.x,orb.y,orb.radius,0,Math.PI*2);ctx.fillStyle=orb.color;ctx.fill(); ctx.beginPath();ctx.arc(orb.x,orb.y,orb.radius/2,0,Math.PI*2);ctx.fillStyle=WHITE;ctx.fill(); }
+            function drawBlocks() { /* ... */ blocks.forEach(block => { if (block.visible) { ctx.fillStyle = block.currentColor; ctx.fillRect(block.x, block.y, block.width, block.height); ctx.strokeStyle = '#333'; ctx.lineWidth=1; ctx.strokeRect(block.x, block.y, block.width, block.height); } }); }
+            function drawGoldenRewardOrb(x, y, time) { /* ... */ const baseRadius = 25; const pulseFactor = Math.sin(time * 0.004) * 0.2 + 1.0; ctx.beginPath();ctx.arc(x,y,baseRadius*2.8*pulseFactor,0,Math.PI*2);ctx.fillStyle=GOLD_GLOW_2;ctx.fill(); ctx.beginPath();ctx.arc(x,y,baseRadius*1.9*pulseFactor,0,Math.PI*2);ctx.fillStyle=GOLD_GLOW_1;ctx.fill(); ctx.beginPath();ctx.arc(x,y,baseRadius*pulseFactor,0,Math.PI*2);ctx.fillStyle=GOLD;ctx.fill(); ctx.beginPath();ctx.arc(x,y,baseRadius*0.5*pulseFactor,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,0.9)';ctx.fill(); }
+            // --- MODIFIED: Draw HUD Function ---
+            function drawHUD() {
+                const hudY1 = 25; // Top line for Title/Score/Lives
+                const hudY2 = 45; // Second line for Level
+                ctx.font = "bold 18px Arial"; // Slightly bolder/smaller for title?
+                ctx.fillStyle = WHITE;
+                // Title (Centered Top)
+                ctx.textAlign = 'center';
+                ctx.fillText("Survesh's Block Buster", SCREEN_WIDTH / 2, hudY1);
+
+                // Score (Left Top)
+                ctx.font = "18px Arial";
+                ctx.textAlign = 'left';
+                ctx.fillText("Score: " + score, 10, hudY1); // Moved score up
+
+                // Lives (Right Top)
+                ctx.textAlign = 'right';
+                ctx.fillText("Lives: " + lives, SCREEN_WIDTH - 10, hudY1); // Moved lives up
+
+                // Level (Centered Below Title)
+                ctx.textAlign = 'center';
+                ctx.fillText("Level: " + (currentLevel + 1), SCREEN_WIDTH / 2, hudY2);
+
+                // Optional Speed Display (Bottom Left)
+                if (orb && gameState === 'playing') {
+                    ctx.textAlign = 'left';
+                    ctx.font = "14px Arial";
+                    ctx.fillText(`Speed: ${orb.currentSpeed.toFixed(1)}`, 10, SCREEN_HEIGHT - 10);
+                }
+            }
+
+            // --- Update Functions (same) ---
+            function updatePaddle() { /* ... */ if(!paddle) return; if (rightPressed) { paddle.x += paddle.speed; } else if (leftPressed) { paddle.x -= paddle.speed; } if(paddle) { paddle.x = Math.max(0, Math.min(SCREEN_WIDTH - paddle.width, paddle.x)); } }
+            function updateOrb() { /* ... */ if(!orb) return; orb.x += orb.dx; orb.y += orb.dy; let bouncedWall = false; if (orb.x + orb.radius > SCREEN_WIDTH || orb.x - orb.radius < 0) { orb.dx = -orb.dx; if (orb.x + orb.radius > SCREEN_WIDTH) orb.x = SCREEN_WIDTH - orb.radius; if (orb.x - orb.radius < 0) orb.x = orb.radius; bouncedWall = true; } if (orb.y - orb.radius < 0) { orb.dy = -orb.dy; orb.y = orb.radius; bouncedWall = true; } if (bouncedWall) { increaseOrbSpeed(ORB_SPEED_INCREASE_PER_HIT); } if (orb.y - orb.radius > SCREEN_HEIGHT) { lives--; console.log(`Life lost. Lives left: ${lives}`); if (lives <= 0) { gameState = "gameOver"; showMessage("GAME OVER", "Final Score: " + score, true); if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; } } else { resetOrbSpeed(); resetOrbPositionAndAngle(); } } }
+
+            // --- Collision Detection & Level Clear (same) ---
+            function collisionDetection() { /* ... */ if (!orb || !paddle) return; let collisionOccurredThisFrame = false; blocks.forEach(block => { if (block.visible && !collisionOccurredThisFrame) { if (orb.x+orb.radius>block.x && orb.x-orb.radius<block.x+block.width && orb.y+orb.radius>block.y && orb.y-orb.radius<block.y+block.height) { const center_x_dist=orb.x-(block.x+block.width/2); const center_y_dist=orb.y-(block.y+block.height/2); const width_sum=orb.radius+block.width/2; const height_sum=orb.radius+block.height/2; const overlap_x=width_sum-Math.abs(center_x_dist); const overlap_y=height_sum-Math.abs(center_y_dist); if (overlap_x >= 0 && overlap_y >= 0) { if (overlap_x >= overlap_y) { orb.dy = -orb.dy; orb.y += orb.dy > 0 ? overlap_y + 0.1 : -overlap_y - 0.1; } else { orb.dx = -orb.dx; orb.x += orb.dx > 0 ? overlap_x + 0.1 : -overlap_x - 0.1; } increaseOrbSpeed(ORB_SPEED_INCREASE_PER_HIT); collisionOccurredThisFrame = true; if (block.isBreakable) { block.health--; if (block.health <= 0) { block.visible = false; score += 10 * block.maxHealth; breakableBlockCount--; lastDestroyedBlockPos = { x: block.x + block.width / 2, y: block.y + block.height / 2 }; console.log(`Block Broken. Remaining: ${breakableBlockCount}`); } else { const darkenFactor = 0.5 + 0.5 * (block.health / block.maxHealth); block.currentColor = darkenColor(block.baseColor, darkenFactor); } } } } } }); if (orb.y+orb.radius>paddle.y && orb.y-orb.radius<paddle.y+paddle.height && orb.x+orb.radius>paddle.x && orb.x-orb.radius<paddle.x+paddle.width && orb.dy>0) { let collidePoint = (orb.x - (paddle.x + paddle.width / 2)) / (paddle.width / 2); collidePoint = Math.max(-1, Math.min(1, collidePoint)); let angleRad = collidePoint * (Math.PI / 3); orb.dy = -orb.currentSpeed * Math.cos(angleRad); orb.dx = orb.currentSpeed * Math.sin(angleRad); orb.y = paddle.y - orb.radius - 0.1; increaseOrbSpeed(ORB_SPEED_INCREASE_PER_HIT); } if (breakableBlockCount <= 0 && gameState === 'playing') { console.log(`Level ${currentLevel + 1} cleared.`); if (currentLevel < MAX_LEVELS - 1) { gameState = "levelCleared"; showMessage(`Level ${currentLevel + 1} Cleared!`, `Score: ${score}`, false, "Press SPACE or TAP screen to Continue"); } else { gameState = "finalWin"; showMessage("YOU WON GOLD!", `Final Score: ${score}`, true); } if (animationFrameId && (gameState === 'levelCleared' || gameState === 'finalWin')) { console.log("Transitioning state to:", gameState); } } }
+
+            // --- Message & Reset Functions (same) ---
+             function showMessage(title, text, showRestart = false, instructions = "") { /* ... same, uses gameState for class ... */ console.log("Showing message:", title); messageOverlay.className = ''; if (gameState === 'gameOver') messageOverlay.classList.add('gameOver'); else if (gameState === 'levelCleared') messageOverlay.classList.add('levelCleared'); else if (gameState === 'finalWin') messageOverlay.classList.add('finalWin'); messageTitle.textContent = title; messageText.innerText = text; messageInstructions.innerText = instructions || (showRestart ? "(Tap Screen or Press R to Restart)" : ""); messageOverlay.style.display = 'flex'; }
+            function hideMessage() { messageOverlay.style.display = 'none'; }
+            function resetGame() { /* ... same ... */ console.log("Resetting game..."); hideMessage(); lives = 3; score = 0; currentLevel = 0; gameState = "playing"; setupLevel(currentLevel); if (!animationFrameId) { console.log("Restarting game loop."); gameLoop(); } }
+            function advanceLevel() { /* ... same ... */ currentLevel++; console.log("Advancing to next level:", currentLevel + 1); gameState = "playing"; setupLevel(currentLevel); hideMessage(); if (!animationFrameId && gameState === 'playing') { console.log("Restarting loop after level advance."); gameLoop(); } }
+
+
+            // --- Game Loop (same) ---
+            let lastTime = 0;
+            function gameLoop(currentTime) { /* ... same loop logic ... */ if (!lastTime) lastTime = currentTime; const deltaTime = currentTime - lastTime; lastTime = currentTime; try { ctx.clearRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT); if (gameState === "playing") { updatePaddle(); updateOrb(); collisionDetection(); drawBlocks(); drawPaddle(); drawOrb(); drawHUD(); } else if (gameState === "levelCleared") { drawBlocks(); drawPaddle(); drawHUD(); } else if (gameState === "finalWin") { blocks.forEach(block => { if (!block.isBreakable && block.visible) { ctx.fillStyle = block.currentColor; ctx.fillRect(block.x, block.y, block.width, block.height); ctx.strokeStyle = '#333'; ctx.lineWidth=1; ctx.strokeRect(block.x, block.y, block.width, block.height); } }); drawGoldenRewardOrb(lastDestroyedBlockPos.x, lastDestroyedBlockPos.y, currentTime); drawHUD(); } else if (gameState === "gameOver") { drawBlocks(); drawPaddle(); drawHUD(); } else if (gameState === "loading") { ctx.font = "30px Arial"; ctx.fillStyle = WHITE; ctx.textAlign = 'center'; ctx.fillText("Loading...", SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2); } if (gameState !== 'gameOver') { animationFrameId = requestAnimationFrame(gameLoop); } else { console.log(`Game loop stopped. State: ${gameState}`); animationFrameId = null; } } catch (error) { console.error("Error in game loop:", error); if (animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; } showMessage("RUNTIME ERROR", "An error occurred. Check console.", true); } }
+
+            // --- Input Event Listeners ---
+            // Keyboard (same)
+            function keyDownHandler(e) { /* ... */ if(e.key=="Right"||e.key=="ArrowRight"){rightPressed=true;}else if(e.key=="Left"||e.key=="ArrowLeft"){leftPressed=true;}else if(e.key==='r'||e.key==='R'){if(gameState==='gameOver'||gameState==='finalWin'){resetGame();}}else if(e.key===' '){if(gameState==='levelCleared'){advanceLevel();}} }
+            function keyUpHandler(e) { /* ... */ if(e.key=="Right"||e.key=="ArrowRight"){rightPressed=false;}else if(e.key=="Left"||e.key=="ArrowLeft"){leftPressed=false;} }
+            document.addEventListener("keydown", keyDownHandler, false);
+            document.addEventListener("keyup", keyUpHandler, false);
+            // Touch (same)
+            function handleTouchMove(event) { event.preventDefault(); if (!paddle || gameState !== 'playing') return; const touch = event.touches[0]; const rect = canvas.getBoundingClientRect(); const scaleX = canvas.width / rect.width; const touchX = (touch.clientX - rect.left) * scaleX; paddle.x = touchX - paddle.width / 2; }
+            function handleTouchStart(event) { if (gameState === 'playing') { event.preventDefault(); handleTouchMove(event); } } // Removed advanceLevel from here, handled by overlay listener
+            canvas.addEventListener("touchstart", handleTouchStart, { passive: false });
+            canvas.addEventListener("touchmove", handleTouchMove, { passive: false });
+            // Restart/Advance Listener (same)
+            const overlayInteractionHandler = (event) => { event.preventDefault(); if (gameState === 'gameOver' || gameState === 'finalWin') { resetGame(); } else if (gameState === 'levelCleared') { advanceLevel(); } };
+            messageOverlay.addEventListener('click', overlayInteractionHandler);
+            messageOverlay.addEventListener('touchstart', overlayInteractionHandler);
+
+             // --- NEW: Fullscreen Button Logic ---
+             if ('fullscreenEnabled' in document || 'webkitFullscreenEnabled' in document || 'mozFullScreenEnabled' in document || 'msFullscreenEnabled' in document) {
+                 console.log("Fullscreen API supported.");
+                 fullscreenBtn.addEventListener('click', () => {
+                     if (!document.fullscreenElement && !document.webkitFullscreenElement && !document.mozFullScreenElement && !document.msFullscreenElement) {
+                         // Enter fullscreen
+                         if (gameContainer.requestFullscreen) { gameContainer.requestFullscreen().catch(err => console.error(`FS Error: ${err.message} (${err.name})`)); }
+                         else if (gameContainer.webkitRequestFullscreen) { gameContainer.webkitRequestFullscreen().catch(err => console.error(`FS Error: ${err.message} (${err.name})`)); } // Safari
+                         else if (gameContainer.mozRequestFullScreen) { gameContainer.mozRequestFullScreen().catch(err => console.error(`FS Error: ${err.message} (${err.name})`)); } // Firefox
+                         else if (gameContainer.msRequestFullscreen) { gameContainer.msRequestFullscreen().catch(err => console.error(`FS Error: ${err.message} (${err.name})`)); } // IE/Edge
+                     } else {
+                         // Exit fullscreen
+                         if (document.exitFullscreen) { document.exitFullscreen(); }
+                         else if (document.webkitExitFullscreen) { document.webkitExitFullscreen(); } // Safari
+                         else if (document.mozCancelFullScreen) { document.mozCancelFullScreen(); } // Firefox
+                         else if (document.msExitFullscreen) { document.msExitFullscreen(); } // IE/Edge
+                     }
+                 });
+
+                 // Optional: Update button text based on state
+                 const fullscreenChangeHandler = () => {
+                     const isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
+                     fullscreenBtn.textContent = isFullscreen ? 'Exit Fullscreen' : 'Fullscreen';
+                     console.log("Fullscreen changed. Is fullscreen:", isFullscreen);
+                 };
+                 document.addEventListener('fullscreenchange', fullscreenChangeHandler);
+                 document.addEventListener('webkitfullscreenchange', fullscreenChangeHandler); // Safari
+                 document.addEventListener('mozfullscreenchange', fullscreenChangeHandler);    // Firefox
+                 document.addEventListener('MSFullscreenChange', fullscreenChangeHandler);   // IE/Edge
+
+             } else {
+                 console.warn("Fullscreen API not supported by this browser.");
+                 fullscreenBtn.style.display = 'none'; // Hide button if not supported
+             }
+
+
+            // --- Start ---
+            console.log("Starting initial game setup...");
+            gameState = "loading";
+            setupLevel(currentLevel);
+            gameState = "playing";
+            console.log("Initial setup complete. Starting game loop...");
+            if (!animationFrameId) { animationFrameId = requestAnimationFrame(gameLoop); }
+
+        }); // End DOMContentLoaded
+    </script>
+</body>
+</html>
